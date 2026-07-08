@@ -17,7 +17,7 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
 [releases](https://github.com/areezkhan79/upm-package-hub/tags):
 
 ```json
-"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.5.0"
+"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.7.0"
 ```
 
 ## Usage
@@ -54,6 +54,20 @@ one back and replaces the current selections to match it exactly (packages
 not in the preset get unchecked). This is the fast way to set up a new
 project: save a "starter kit" preset once, then load + apply it in every new
 project going forward.
+
+## Dependencies
+
+If a registry entry declares `"dependencies": ["com.other.package"]`, checking
+that package auto-checks its dependencies too, and locks their checkbox
+(showing "Required by: ...") so they can't be unchecked while still needed.
+
+## GitHub token
+
+Optional — expand **Settings** and paste a GitHub Personal Access Token to
+raise the unauthenticated API rate limit (60 requests/hour, easy to hit with
+many packages) and to enable browsing private repos. No scopes are needed for
+public repos; use the `repo` scope for private ones. Stored via `EditorPrefs`
+on your machine only, never written to any file that gets committed.
 
 ## Adding a package to a registry
 

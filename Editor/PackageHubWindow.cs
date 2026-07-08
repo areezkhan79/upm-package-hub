@@ -57,6 +57,23 @@ namespace AreezKhan79.PackageHub.Editor
         private const string UncategorizedLabel = "Other";
         private readonly Dictionary<string, bool> _categoryFoldout = new Dictionary<string, bool>();
 
+        private const string TokenPrefKey = "AreezKhan79.PackageHub.GitHubToken";
+
+        private static string GitHubToken
+        {
+            get => EditorPrefs.GetString(TokenPrefKey, "");
+            set => EditorPrefs.SetString(TokenPrefKey, value);
+        }
+
+        private static void ApplyAuthHeader(UnityWebRequest request)
+        {
+            var token = GitHubToken;
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.SetRequestHeader("Authorization", "Bearer " + token);
+            }
+        }
+
         [MenuItem("Window/Package Hub")]
         private static void Open()
         {
@@ -101,6 +118,7 @@ namespace AreezKhan79.PackageHub.Editor
             foreach (var url in urls)
             {
                 var request = UnityWebRequest.Get(url);
+                ApplyAuthHeader(request);
                 var op = request.SendWebRequest();
                 op.completed += _ =>
                 {
@@ -188,6 +206,7 @@ namespace AreezKhan79.PackageHub.Editor
             var url = $"https://api.github.com/repos/{owner}/{repo}/tags";
             var request = UnityWebRequest.Get(url);
             request.SetRequestHeader("User-Agent", "UnityPackageHub");
+            ApplyAuthHeader(request);
             var op = request.SendWebRequest();
             op.completed += _ =>
             {
@@ -669,6 +688,21 @@ namespace AreezKhan79.PackageHub.Editor
                     }
 
                     GUI.enabled = true;
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("GitHub Token (optional)", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    "Raises the 60/hour unauthenticated API rate limit and enables access to private repos. " +
+                    "Stored locally via EditorPrefs on this machine only - never committed to the project. " +
+                    "No scopes needed for public repos; 'repo' scope for private ones.",
+                    EditorStyles.wordWrappedMiniLabel);
+
+                var currentToken = GitHubToken;
+                var newToken = EditorGUILayout.PasswordField("Token", currentToken);
+                if (newToken != currentToken)
+                {
+                    GitHubToken = newToken;
                 }
             }
 
