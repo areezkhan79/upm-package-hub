@@ -946,9 +946,12 @@ namespace AreezKhan79.PackageHub.Editor
                     }
                     else
                     {
+                        // '/' in Popup options is treated as a submenu separator (same as MenuItem paths),
+                        // so substitute a visually-identical slash that isn't special-cased.
+                        var displayOptions = registryUrls.Select(u => u.Replace("/", "∕")).ToArray();
                         _newPackageRegistryIndex = EditorGUILayout.Popup(
                             "Add to registry", Mathf.Clamp(_newPackageRegistryIndex, 0, registryUrls.Count - 1),
-                            registryUrls.ToArray());
+                            displayOptions);
                     }
 
                     if (string.IsNullOrEmpty(GitHubToken))
