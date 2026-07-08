@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.PackageManager;
@@ -73,6 +74,14 @@ namespace AreezKhan79.PackageHub.Editor
                 request.SetRequestHeader("Authorization", "Bearer " + token);
             }
         }
+
+        private bool _showCreateRegistry;
+        private string _newRegistryRepoName = "upm-registry";
+        private string _newRegistryDescription = "My personal Unity package registry.";
+        private bool _newRegistryPrivate;
+        private bool _isCreatingRegistry;
+        private string _createRegistryStatus;
+        private bool _createRegistryIsError;
 
         [MenuItem("Window/Package Hub")]
         private static void Open()
@@ -319,6 +328,7 @@ namespace AreezKhan79.PackageHub.Editor
             EditorGUILayout.Space();
 
             DrawSettings();
+            DrawCreateRegistrySection();
 
             if (_isLoadingRegistry)
             {
@@ -707,6 +717,158 @@ namespace AreezKhan79.PackageHub.Editor
             }
 
             EditorGUILayout.Space();
+        }
+
+        private void DrawCreateRegistrySection()
+        {
+            _showCreateRegistry = EditorGUILayout.Foldout(_showCreateRegistry, "Create New Registry", true);
+            if (!_showCreateRegistry)
+            {
+                EditorGUILayout.Space();
+                return;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "Creates a new GitHub repository with a starter registry.json and adds it to your " +
+                    "registries above - no terminal or git commands needed. Requires a GitHub token with " +
+                    "repo-creation rights, set in Settings above.",
+                    EditorStyles.wordWrappedMiniLabel);
+
+                _newRegistryRepoName = EditorGUILayout.TextField(
+                    new GUIContent("Repo name", "The new GitHub repository's name"), _newRegistryRepoName);
+                _newRegistryDescription = EditorGUILayout.TextField(
+                    new GUIContent("Description", "Shown on the GitHub repo page"), _newRegistryDescription);
+                _newRegistryPrivate = EditorGUILayout.Toggle(
+                    new GUIContent("Private", "Private repos also require a token with 'repo' scope for browsing"),
+                    _newRegistryPrivate);
+
+                if (string.IsNullOrEmpty(GitHubToken))
+                {
+                    EditorGUILayout.HelpBox("Add a GitHub token above first.", MessageType.Warning);
+                }
+
+                GUI.enabled = !_isCreatingRegistry && !string.IsNullOrEmpty(GitHubToken) &&
+                              !string.IsNullOrWhiteSpace(_newRegistryRepoName);
+                if (GUILayout.Button(_isCreatingRegistry ? "Creating..." : "Create Registry"))
+                {
+                    CreateNewRegistry();
+                }
+
+                GUI.enabled = true;
+
+                if (_createRegistryStatus != null)
+                {
+                    EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
+                }
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private static UnityWebRequest CreateJsonRequest(string url, string method, string jsonBody)
+        {
+            var request = new UnityWebRequest(url, method)
+            {
+                downloadHandler = new DownloadHandlerBuffer()
+            };
+
+            if (!string.IsNullOrEmpty(jsonBody))
+            {
+                request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(jsonBody));
+            }
+
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("User-Agent", "UnityPackageHub");
+            ApplyAuthHeader(request);
+            return request;
+        }
+
+        private void CreateNewRegistry()
+        {
+            _isCreatingRegistry = true;
+            _createRegistryStatus = "Creating repository...";
+            _createRegistryIsError = false;
+
+            var body = JsonUtility.ToJson(new CreateRepoRequest
+            {
+                name = _newRegistryRepoName.Trim(),
+                description = _newRegistryDescription,
+                @private = _newRegistryPrivate
+            });
+
+            var request = CreateJsonRequest("https://api.github.com/user/repos", "POST", body);
+            var op = request.SendWebRequest();
+            op.completed += _ =>
+            {
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    _isCreatingRegistry = false;
+                    _createRegistryStatus = $"Failed to create repo ({request.responseCode}): {request.downloadHandler.text}";
+                    _createRegistryIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                CreateRepoResponse repo;
+                try
+                {
+                    repo = JsonUtility.FromJson<CreateRepoResponse>(request.downloadHandler.text);
+                }
+                catch (Exception e)
+                {
+                    _isCreatingRegistry = false;
+                    _createRegistryStatus = $"Repo created, but failed to parse the response: {e.Message}";
+                    _createRegistryIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                CreateRegistryFile(repo);
+            };
+        }
+
+        private void CreateRegistryFile(CreateRepoResponse repo)
+        {
+            _createRegistryStatus = "Creating registry.json...";
+            Repaint();
+
+            const string initialRegistry = "{\n  \"packages\": []\n}\n";
+            var content = Convert.ToBase64String(Encoding.UTF8.GetBytes(initialRegistry));
+            var body = JsonUtility.ToJson(new CreateFileRequest { message = "Initial registry", content = content });
+
+            var url = $"https://api.github.com/repos/{repo.owner.login}/{repo.name}/contents/registry.json";
+            var request = CreateJsonRequest(url, "PUT", body);
+            var op = request.SendWebRequest();
+            op.completed += _ =>
+            {
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    _isCreatingRegistry = false;
+                    _createRegistryStatus =
+                        $"Repo created, but failed to add registry.json ({request.responseCode}): {request.downloadHandler.text}";
+                    _createRegistryIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                FinishCreateRegistry(repo);
+            };
+        }
+
+        private void FinishCreateRegistry(CreateRepoResponse repo)
+        {
+            var branch = string.IsNullOrEmpty(repo.default_branch) ? "main" : repo.default_branch;
+            var rawUrl = $"https://raw.githubusercontent.com/{repo.owner.login}/{repo.name}/{branch}/registry.json";
+
+            PackageHubSettings.instance.AddRegistry(rawUrl);
+
+            _isCreatingRegistry = false;
+            _createRegistryStatus = $"Created {repo.full_name} and added it to your registries.";
+            _createRegistryIsError = false;
+            _showCreateRegistry = false;
+            FetchAllRegistries();
         }
 
         private void DrawPackageRow(PackageEntry pkg, PackageUiState state, Dictionary<string, List<string>> requiredByMap)

@@ -5,11 +5,11 @@ more personal/team package registries, instead of pasting git URLs into the
 built-in Package Manager one at a time.
 
 This tool is **not tied to any specific registry or GitHub account** — on
-first use you point it at whichever `registry.json` URL(s) you want, and it
-works from there. See [areezkhan79/upm-registry](https://github.com/areezkhan79/upm-registry)
-for a working example of what a registry looks like, or the "New Registry"
-wizard inside the tool (coming in a later version) to create your own without
-touching git directly.
+first use you point it at whichever `registry.json` URL(s) you want, or use
+the built-in **Create New Registry** wizard to bootstrap your own from
+scratch without touching git directly. See
+[areezkhan79/upm-registry](https://github.com/areezkhan79/upm-registry) for a
+working example of what a registry looks like.
 
 ## Install (Unity Package Manager)
 
@@ -17,7 +17,7 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
 [releases](https://github.com/areezkhan79/upm-package-hub/tags):
 
 ```json
-"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.7.0"
+"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.8.0"
 ```
 
 ## Usage
@@ -68,6 +68,15 @@ raise the unauthenticated API rate limit (60 requests/hour, easy to hit with
 many packages) and to enable browsing private repos. No scopes are needed for
 public repos; use the `repo` scope for private ones. Stored via `EditorPrefs`
 on your machine only, never written to any file that gets committed.
+
+## Creating a new registry
+
+Expand **Create New Registry**, fill in a repo name/description, choose
+public or private, click **Create Registry**. This calls the GitHub API to
+create a new repo, adds a starter `registry.json` to it (via GitHub's
+Contents API — no local git needed), and adds it to your configured
+registries automatically. Requires a GitHub token (see below) with
+repo-creation rights.
 
 ## Adding a package to a registry
 
