@@ -9,6 +9,7 @@ namespace AreezKhan79.PackageHub.Editor
         public string displayName;
         public string description;
         public string repoUrl;
+        public string category;
     }
 
     [Serializable]

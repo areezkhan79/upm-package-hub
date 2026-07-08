@@ -53,6 +53,9 @@ namespace AreezKhan79.PackageHub.Editor
         private string _newRegistryUrl = "";
         private string _searchQuery = "";
 
+        private const string UncategorizedLabel = "Other";
+        private readonly Dictionary<string, bool> _categoryFoldout = new Dictionary<string, bool>();
+
         [MenuItem("Window/Package Hub")]
         private static void Open()
         {
@@ -342,9 +345,14 @@ namespace AreezKhan79.PackageHub.Editor
             }
             else
             {
-                foreach (var pkg in visible)
+                var groups = visible
+                    .GroupBy(GetCategory)
+                    .OrderBy(g => g.Key == UncategorizedLabel ? 1 : 0)
+                    .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var group in groups)
                 {
-                    DrawPackageRow(pkg, _uiState[pkg.name]);
+                    DrawCategoryGroup(group.Key, group.ToList());
                 }
             }
 
@@ -377,6 +385,33 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 EditorGUILayout.HelpBox(_applyStatus, _applyIsError ? MessageType.Error : MessageType.Info);
             }
+        }
+
+        private static string GetCategory(PackageEntry pkg) =>
+            string.IsNullOrWhiteSpace(pkg.category) ? UncategorizedLabel : pkg.category;
+
+        private void DrawCategoryGroup(string category, List<PackageEntry> packages)
+        {
+            if (!_categoryFoldout.TryGetValue(category, out var expanded))
+            {
+                expanded = true;
+            }
+
+            expanded = EditorGUILayout.Foldout(expanded, $"{category} ({packages.Count})", true, EditorStyles.foldoutHeader);
+            _categoryFoldout[category] = expanded;
+
+            if (!expanded)
+            {
+                EditorGUILayout.Space(2);
+                return;
+            }
+
+            foreach (var pkg in packages)
+            {
+                DrawPackageRow(pkg, _uiState[pkg.name]);
+            }
+
+            EditorGUILayout.Space(4);
         }
 
         private void SetSelectedForVisible(bool selected)
