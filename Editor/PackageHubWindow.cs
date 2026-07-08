@@ -83,6 +83,22 @@ namespace AreezKhan79.PackageHub.Editor
         private string _createRegistryStatus;
         private bool _createRegistryIsError;
 
+        private static readonly Regex PackageNameRegex =
+            new Regex(@"^[a-z0-9]+(\.[a-z0-9\-]+){2,}$", RegexOptions.Compiled);
+
+        private bool _showCreatePackage;
+        private string _newPackageName = "com.areezkhan79.";
+        private string _newPackageDisplayName = "";
+        private string _newPackageDescription = "";
+        private string _newPackageCategory = "";
+        private string _newPackageFolder = "";
+        private string _newPackageRepoName = "";
+        private bool _newPackagePrivate;
+        private int _newPackageRegistryIndex;
+        private bool _isCreatingPackage;
+        private string _createPackageStatus;
+        private bool _createPackageIsError;
+
         [MenuItem("Window/Package Hub")]
         private static void Open()
         {
@@ -329,6 +345,7 @@ namespace AreezKhan79.PackageHub.Editor
 
             DrawSettings();
             DrawCreateRegistrySection();
+            DrawCreatePackageSection();
 
             if (_isLoadingRegistry)
             {
@@ -877,6 +894,433 @@ namespace AreezKhan79.PackageHub.Editor
             _createRegistryIsError = false;
             _showCreateRegistry = false;
             FetchAllRegistries();
+        }
+
+        private void DrawCreatePackageSection()
+        {
+            _showCreatePackage = EditorGUILayout.Foldout(_showCreatePackage, "Create New Package", true);
+            var registryUrls = PackageHubSettings.instance.RegistryUrls;
+
+            if (_showCreatePackage)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        "Scaffolds a new Unity package on disk, publishes it to a new GitHub repo, and adds it " +
+                        "to a registry below - the full publish loop, no terminal needed.",
+                        EditorStyles.wordWrappedMiniLabel);
+
+                    _newPackageName = EditorGUILayout.TextField(
+                        new GUIContent("Package name", "Reverse-domain id, e.g. com.yourname.module"), _newPackageName);
+                    _newPackageDisplayName = EditorGUILayout.TextField(
+                        new GUIContent("Display name"), _newPackageDisplayName);
+                    _newPackageDescription = EditorGUILayout.TextField(
+                        new GUIContent("Description"), _newPackageDescription);
+                    _newPackageCategory = EditorGUILayout.TextField(
+                        new GUIContent("Category", "Optional grouping shown in Package Hub"), _newPackageCategory);
+
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField(
+                            new GUIContent("Local folder", "Parent folder where the package files will be created"),
+                            GUILayout.Width(EditorGUIUtility.labelWidth));
+                        EditorGUILayout.LabelField(string.IsNullOrEmpty(_newPackageFolder) ? "(not set)" : _newPackageFolder);
+                        if (GUILayout.Button("Browse...", GUILayout.Width(80)))
+                        {
+                            var picked = EditorUtility.OpenFolderPanel("Choose parent folder for the new package", "", "");
+                            if (!string.IsNullOrEmpty(picked))
+                            {
+                                _newPackageFolder = picked;
+                            }
+                        }
+                    }
+
+                    _newPackageRepoName = EditorGUILayout.TextField(
+                        new GUIContent("GitHub repo name", "Defaults to the last segment of the package name if left blank"),
+                        _newPackageRepoName);
+                    _newPackagePrivate = EditorGUILayout.Toggle(new GUIContent("Private"), _newPackagePrivate);
+
+                    if (registryUrls.Count == 0)
+                    {
+                        EditorGUILayout.HelpBox("Configure at least one registry above to publish into.", MessageType.Warning);
+                    }
+                    else
+                    {
+                        _newPackageRegistryIndex = EditorGUILayout.Popup(
+                            "Add to registry", Mathf.Clamp(_newPackageRegistryIndex, 0, registryUrls.Count - 1),
+                            registryUrls.ToArray());
+                    }
+
+                    if (string.IsNullOrEmpty(GitHubToken))
+                    {
+                        EditorGUILayout.HelpBox("Add a GitHub token above first.", MessageType.Warning);
+                    }
+
+                    var canCreate = !_isCreatingPackage
+                                     && !string.IsNullOrEmpty(GitHubToken)
+                                     && registryUrls.Count > 0
+                                     && PackageNameRegex.IsMatch(_newPackageName.Trim())
+                                     && !string.IsNullOrWhiteSpace(_newPackageDisplayName)
+                                     && !string.IsNullOrEmpty(_newPackageFolder);
+
+                    GUI.enabled = canCreate;
+                    if (GUILayout.Button(_isCreatingPackage ? "Creating..." : "Create Package"))
+                    {
+                        CreateNewPackage();
+                    }
+
+                    GUI.enabled = true;
+                }
+            }
+
+            if (_createPackageStatus != null)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.HelpBox(_createPackageStatus, _createPackageIsError ? MessageType.Error : MessageType.Info);
+                    if (GUILayout.Button("x", GUILayout.Width(20), GUILayout.Height(20)))
+                    {
+                        _createPackageStatus = null;
+                    }
+                }
+            }
+
+            EditorGUILayout.Space();
+        }
+
+        private string DeriveRepoName()
+        {
+            var trimmed = _newPackageName.Trim();
+            var lastDot = trimmed.LastIndexOf('.');
+            return lastDot >= 0 ? trimmed.Substring(lastDot + 1) : trimmed;
+        }
+
+        private static string DeriveIdentifier(string packageName)
+        {
+            var segments = packageName.Split('.');
+            var parts = new List<string>();
+            for (var i = 1; i < segments.Length; i++) // skip the leading "com"
+            {
+                parts.Add(Capitalize(segments[i]));
+            }
+
+            return parts.Count > 0 ? string.Join(".", parts) : Capitalize(packageName);
+        }
+
+        private static string Capitalize(string s)
+        {
+            return string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
+        }
+
+        private static string NewGuid() => Guid.NewGuid().ToString("N");
+
+        private static string MakeFileMetaText(string guid, string importer)
+        {
+            return $"fileFormatVersion: 2\nguid: {guid}\n{importer}:\n  externalObjects: {{}}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n";
+        }
+
+        private static string MakeMonoMetaText(string guid)
+        {
+            return $"fileFormatVersion: 2\nguid: {guid}\nMonoImporter:\n  externalObjects: {{}}\n  serializedVersion: 2\n  defaultReferences: []\n  executionOrder: 0\n  icon: {{instanceID: 0}}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n";
+        }
+
+        private static string MakeFolderMetaText(string guid)
+        {
+            return $"fileFormatVersion: 2\nguid: {guid}\nfolderAsset: yes\nDefaultImporter:\n  externalObjects: {{}}\n  userData:\n  assetBundleName:\n  assetBundleVariant:\n";
+        }
+
+        private static void ScaffoldPackageFiles(string folder, string packageName, string displayName, string description)
+        {
+            var runtimeFolder = Path.Combine(folder, "Runtime");
+            Directory.CreateDirectory(runtimeFolder);
+
+            var packageJson = JsonUtility.ToJson(new NewPackageJson
+            {
+                name = packageName,
+                displayName = displayName,
+                description = description ?? ""
+            }, true);
+            File.WriteAllText(Path.Combine(folder, "package.json"), packageJson);
+            File.WriteAllText(Path.Combine(folder, "package.json.meta"), MakeFileMetaText(NewGuid(), "TextScriptImporter"));
+
+            File.WriteAllText(Path.Combine(folder, "Runtime.meta"), MakeFolderMetaText(NewGuid()));
+
+            var identifier = DeriveIdentifier(packageName);
+            var asmdefJson = JsonUtility.ToJson(new AsmdefJson
+            {
+                name = identifier,
+                rootNamespace = identifier
+            }, true);
+            var asmdefPath = Path.Combine(runtimeFolder, identifier + ".asmdef");
+            File.WriteAllText(asmdefPath, asmdefJson);
+            File.WriteAllText(asmdefPath + ".meta", MakeFileMetaText(NewGuid(), "AssemblyDefinitionImporter"));
+
+            var scriptName = identifier.Replace(".", "") + "Placeholder";
+            var scriptPath = Path.Combine(runtimeFolder, scriptName + ".cs");
+            var scriptContent =
+                "using UnityEngine;\n\n" +
+                $"namespace {identifier}\n" +
+                "{\n" +
+                $"    public class {scriptName} : MonoBehaviour\n" +
+                "    {\n" +
+                "    }\n" +
+                "}\n";
+            File.WriteAllText(scriptPath, scriptContent);
+            File.WriteAllText(scriptPath + ".meta", MakeMonoMetaText(NewGuid()));
+        }
+
+        private static bool RunGit(string workingDirectory, string arguments, out string output, out string error)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git", arguments)
+                {
+                    WorkingDirectory = workingDirectory,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (var process = System.Diagnostics.Process.Start(psi))
+                {
+                    output = process.StandardOutput.ReadToEnd();
+                    error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    return process.ExitCode == 0;
+                }
+            }
+            catch (Exception e)
+            {
+                output = "";
+                error = $"Could not run git: {e.Message} (is git installed and on PATH?)";
+                return false;
+            }
+        }
+
+        private static bool TryParseRawGitHubUrl(string rawUrl, out string owner, out string repo, out string branch, out string path)
+        {
+            owner = repo = branch = path = null;
+            const string prefix = "https://raw.githubusercontent.com/";
+            if (!rawUrl.StartsWith(prefix)) return false;
+
+            var rest = rawUrl.Substring(prefix.Length);
+            var parts = rest.Split(new[] { '/' }, 4);
+            if (parts.Length < 4) return false;
+
+            owner = parts[0];
+            repo = parts[1];
+            branch = parts[2];
+            path = parts[3];
+            return true;
+        }
+
+        private void CreateNewPackage()
+        {
+            _isCreatingPackage = true;
+            _createPackageIsError = false;
+            _createPackageStatus = "Scaffolding package files...";
+            Repaint();
+
+            var repoName = string.IsNullOrWhiteSpace(_newPackageRepoName) ? DeriveRepoName() : _newPackageRepoName.Trim();
+            var packageFolder = Path.Combine(_newPackageFolder, repoName);
+            var packageName = _newPackageName.Trim();
+            var displayName = _newPackageDisplayName.Trim();
+
+            try
+            {
+                if (Directory.Exists(packageFolder) && Directory.GetFileSystemEntries(packageFolder).Length > 0)
+                {
+                    throw new InvalidOperationException($"Folder already exists and is not empty: {packageFolder}");
+                }
+
+                ScaffoldPackageFiles(packageFolder, packageName, displayName, _newPackageDescription);
+            }
+            catch (Exception e)
+            {
+                _isCreatingPackage = false;
+                _createPackageStatus = $"Failed to scaffold package: {e.Message}";
+                _createPackageIsError = true;
+                Repaint();
+                return;
+            }
+
+            _createPackageStatus = "Initializing git repository...";
+            Repaint();
+
+            if (!RunGit(packageFolder, "init", out _, out var initErr) ||
+                !RunGit(packageFolder, "add -A", out _, out var addErr) ||
+                !RunGit(packageFolder, "commit -m \"Initial package scaffold\"", out _, out var commitErr) ||
+                !RunGit(packageFolder, "branch -M main", out _, out var branchErr))
+            {
+                _isCreatingPackage = false;
+                _createPackageStatus = $"Git init failed: {initErr}{addErr}{commitErr}{branchErr}";
+                _createPackageIsError = true;
+                Repaint();
+                return;
+            }
+
+            _createPackageStatus = "Creating GitHub repository...";
+            Repaint();
+
+            var body = JsonUtility.ToJson(new CreateRepoRequest
+            {
+                name = repoName,
+                description = _newPackageDescription,
+                @private = _newPackagePrivate
+            });
+
+            var request = CreateJsonRequest("https://api.github.com/user/repos", "POST", body);
+            var op = request.SendWebRequest();
+            op.completed += _ =>
+            {
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    _isCreatingPackage = false;
+                    _createPackageStatus = $"Failed to create repo ({request.responseCode}): {request.downloadHandler.text}";
+                    _createPackageIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                CreateRepoResponse repo;
+                try
+                {
+                    repo = JsonUtility.FromJson<CreateRepoResponse>(request.downloadHandler.text);
+                }
+                catch (Exception e)
+                {
+                    _isCreatingPackage = false;
+                    _createPackageStatus = $"Repo created, but failed to parse the response: {e.Message}";
+                    _createPackageIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                PushAndTagPackage(packageFolder, packageName, displayName, repo);
+            };
+        }
+
+        private void PushAndTagPackage(string packageFolder, string packageName, string displayName, CreateRepoResponse repo)
+        {
+            _createPackageStatus = "Pushing to GitHub...";
+            Repaint();
+
+            var remoteUrl = $"https://github.com/{repo.owner.login}/{repo.name}.git";
+
+            if (!RunGit(packageFolder, $"remote add origin {remoteUrl}", out _, out var remoteErr) ||
+                !RunGit(packageFolder, "push -u origin main", out _, out var pushErr) ||
+                !RunGit(packageFolder, "tag -a v0.1.0 -m \"v0.1.0 - initial package\"", out _, out var tagErr) ||
+                !RunGit(packageFolder, "push origin v0.1.0", out _, out var pushTagErr))
+            {
+                _isCreatingPackage = false;
+                _createPackageStatus = $"Repo created, but push failed: {remoteErr}{pushErr}{tagErr}{pushTagErr}";
+                _createPackageIsError = true;
+                Repaint();
+                return;
+            }
+
+            var newEntry = new PackageEntry
+            {
+                name = packageName,
+                displayName = displayName,
+                description = _newPackageDescription,
+                repoUrl = remoteUrl,
+                category = string.IsNullOrWhiteSpace(_newPackageCategory) ? null : _newPackageCategory.Trim()
+            };
+
+            var registryUrls = PackageHubSettings.instance.RegistryUrls;
+            var targetRegistry = registryUrls[Mathf.Clamp(_newPackageRegistryIndex, 0, registryUrls.Count - 1)];
+
+            _createPackageStatus = "Adding to registry...";
+            Repaint();
+
+            AppendToRegistry(targetRegistry, newEntry);
+        }
+
+        private void AppendToRegistry(string rawRegistryUrl, PackageEntry newEntry)
+        {
+            if (!TryParseRawGitHubUrl(rawRegistryUrl, out var owner, out var repo, out var branch, out var path))
+            {
+                _isCreatingPackage = false;
+                _createPackageStatus = "Package repo created and pushed, but couldn't parse the target registry " +
+                                        "URL to update it automatically. Add the entry manually.";
+                _createPackageIsError = true;
+                Repaint();
+                return;
+            }
+
+            var getUrl = $"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}";
+            var getRequest = CreateJsonRequest(getUrl, "GET", null);
+            var op = getRequest.SendWebRequest();
+            op.completed += _ =>
+            {
+                if (getRequest.result != UnityWebRequest.Result.Success)
+                {
+                    _isCreatingPackage = false;
+                    _createPackageStatus = $"Package repo created and pushed, but failed to read the registry file " +
+                                            $"({getRequest.responseCode}). Add the entry manually.";
+                    _createPackageIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                ContentsGetResponse existing;
+                Registry registry;
+                try
+                {
+                    existing = JsonUtility.FromJson<ContentsGetResponse>(getRequest.downloadHandler.text);
+                    var decoded = Encoding.UTF8.GetString(
+                        Convert.FromBase64String(existing.content.Replace("\n", "").Replace("\r", "")));
+                    registry = JsonUtility.FromJson<Registry>(decoded);
+                    if (registry.packages == null) registry.packages = Array.Empty<PackageEntry>();
+                }
+                catch (Exception e)
+                {
+                    _isCreatingPackage = false;
+                    _createPackageStatus = $"Package repo created and pushed, but failed to parse the registry " +
+                                            $"file: {e.Message}. Add the entry manually.";
+                    _createPackageIsError = true;
+                    Repaint();
+                    return;
+                }
+
+                var updated = registry.packages.Where(p => p.name != newEntry.name).ToList();
+                updated.Add(newEntry);
+                registry.packages = updated.ToArray();
+
+                var newContent = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonUtility.ToJson(registry, true)));
+                var putBody = JsonUtility.ToJson(new UpdateFileRequest
+                {
+                    message = $"Add {newEntry.name} to registry",
+                    content = newContent,
+                    sha = existing.sha
+                });
+
+                var putUrl = $"https://api.github.com/repos/{owner}/{repo}/contents/{path}";
+                var putRequest = CreateJsonRequest(putUrl, "PUT", putBody);
+                var putOp = putRequest.SendWebRequest();
+                putOp.completed += __ =>
+                {
+                    _isCreatingPackage = false;
+
+                    if (putRequest.result != UnityWebRequest.Result.Success)
+                    {
+                        _createPackageStatus = $"Package repo created and pushed, but failed to update the " +
+                                                $"registry ({putRequest.responseCode}). Add the entry manually.";
+                        _createPackageIsError = true;
+                    }
+                    else
+                    {
+                        _createPackageStatus = $"Created and published {newEntry.name}, added it to the registry.";
+                        _createPackageIsError = false;
+                        _showCreatePackage = false;
+                        FetchAllRegistries();
+                    }
+
+                    Repaint();
+                };
+            };
         }
 
         private void DrawPackageRow(PackageEntry pkg, PackageUiState state, Dictionary<string, List<string>> requiredByMap)

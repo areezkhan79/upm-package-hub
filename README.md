@@ -17,7 +17,7 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
 [releases](https://github.com/areezkhan79/upm-package-hub/tags):
 
 ```json
-"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.8.0"
+"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.9.0"
 ```
 
 ## Usage
@@ -78,7 +78,27 @@ Contents API — no local git needed), and adds it to your configured
 registries automatically. Requires a GitHub token (see below) with
 repo-creation rights.
 
+## Creating a new package
+
+Expand **Create New Package**, fill in the package name (reverse-domain,
+e.g. `com.yourname.module`), display name, description, optional category,
+pick a local parent folder, and which registry to publish into, then click
+**Create Package**. This:
+
+1. Scaffolds a minimal valid Unity package on disk (`package.json`, a
+   `Runtime/` asmdef, and a placeholder script — all with the required
+   `.meta` files already generated).
+2. Runs `git init`/`add`/`commit` locally.
+3. Creates a new GitHub repository via the GitHub API.
+4. Pushes and tags it `v0.1.0`.
+5. Appends an entry for it to your chosen registry's `registry.json` via
+   GitHub's Contents API.
+
+Requires both a GitHub token (see below) and `git` installed and on your
+system `PATH`. This is the full publish loop this repo's own README
+originally walked through by hand — automated end to end.
+
 ## Adding a package to a registry
 
 See [upm-registry's README](https://github.com/areezkhan79/upm-registry) for
-the registry.json schema.
+the registry.json schema, or use the **Create New Package** wizard above.
