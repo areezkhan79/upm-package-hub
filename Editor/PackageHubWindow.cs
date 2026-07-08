@@ -16,6 +16,9 @@ namespace AreezKhan79.PackageHub.Editor
         private static readonly Regex ManifestEntryRegex =
             new Regex("\"(?<name>[^\"]+)\"\\s*:\\s*\"(?<value>[^\"]+)\"", RegexOptions.Compiled);
 
+        private static readonly Regex SemverRegex =
+            new Regex(@"^v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)", RegexOptions.Compiled);
+
         private class PackageUiState
         {
             public bool selected;
@@ -27,6 +30,13 @@ namespace AreezKhan79.PackageHub.Editor
             public string installedVersion;
         }
 
+        private class ApplyDiff
+        {
+            public readonly List<string> ToAdd = new List<string>();
+            public readonly List<string> ToRemove = new List<string>();
+            public readonly List<string> SummaryLines = new List<string>();
+        }
+
         private Registry _registry;
         private bool _isLoadingRegistry;
         private string _loadError;
@@ -36,10 +46,12 @@ namespace AreezKhan79.PackageHub.Editor
         private bool _isApplying;
         private string _applyStatus;
         private bool _applyIsError;
+        private ApplyDiff _pendingDiff;
         private AddAndRemoveRequest _pendingRequest;
 
         private bool _showSettings;
         private string _newRegistryUrl = "";
+        private string _searchQuery = "";
 
         [MenuItem("Window/Package Hub")]
         private static void Open()
@@ -64,6 +76,7 @@ namespace AreezKhan79.PackageHub.Editor
         {
             var urls = PackageHubSettings.instance.RegistryUrls;
             _registry = new Registry { packages = Array.Empty<PackageEntry>() };
+            _pendingDiff = null;
 
             if (urls.Count == 0)
             {
@@ -187,7 +200,8 @@ namespace AreezKhan79.PackageHub.Editor
                 {
                     var wrapped = "{\"items\":" + request.downloadHandler.text + "}";
                     var parsed = JsonUtility.FromJson<GitTagListWrapper>(wrapped);
-                    state.versions = parsed.items?.Select(t => t.name).ToArray() ?? Array.Empty<string>();
+                    var names = parsed.items?.Select(t => t.name) ?? Enumerable.Empty<string>();
+                    state.versions = names.OrderBy(v => v, Comparer<string>.Create(CompareVersionsDescending)).ToArray();
 
                     if (state.versions.Length > 0)
                     {
@@ -206,12 +220,57 @@ namespace AreezKhan79.PackageHub.Editor
             };
         }
 
+        private static (int major, int minor, int patch)? ParseSemver(string tag)
+        {
+            var m = SemverRegex.Match(tag);
+            if (!m.Success) return null;
+            return (
+                int.Parse(m.Groups["major"].Value),
+                int.Parse(m.Groups["minor"].Value),
+                int.Parse(m.Groups["patch"].Value));
+        }
+
+        private static int CompareVersionsDescending(string x, string y)
+        {
+            var px = ParseSemver(x);
+            var py = ParseSemver(y);
+
+            if (px.HasValue && py.HasValue) return px.Value.CompareTo(py.Value) * -1;
+            if (px.HasValue) return -1;
+            if (py.HasValue) return 1;
+            return string.CompareOrdinal(y, x);
+        }
+
         private static (string owner, string repo) ParseOwnerRepo(string repoUrl)
         {
             var trimmed = repoUrl.TrimEnd('/');
             if (trimmed.EndsWith(".git")) trimmed = trimmed.Substring(0, trimmed.Length - 4);
             var parts = trimmed.Split('/');
             return (parts[parts.Length - 2], parts[parts.Length - 1]);
+        }
+
+        private IEnumerable<PackageEntry> GetFilteredPackages()
+        {
+            if (_registry?.packages == null) yield break;
+
+            var query = _searchQuery?.Trim();
+            foreach (var pkg in _registry.packages)
+            {
+                if (string.IsNullOrEmpty(query) || MatchesQuery(pkg, query))
+                {
+                    yield return pkg;
+                }
+            }
+        }
+
+        private static bool MatchesQuery(PackageEntry pkg, string query)
+        {
+            return Contains(pkg.displayName, query) || Contains(pkg.name, query) || Contains(pkg.description, query);
+        }
+
+        private static bool Contains(string haystack, string needle)
+        {
+            return !string.IsNullOrEmpty(haystack) && haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void OnGUI()
@@ -221,7 +280,7 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 EditorGUILayout.LabelField("Package Hub", EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Refresh", GUILayout.Width(70)))
+                if (GUILayout.Button(new GUIContent("Refresh", "Re-fetch registry.json from all configured registries"), GUILayout.Width(70)))
                 {
                     FetchAllRegistries();
                 }
@@ -256,30 +315,80 @@ namespace AreezKhan79.PackageHub.Editor
                 return;
             }
 
-            _scroll = EditorGUILayout.BeginScrollView(_scroll);
-            foreach (var pkg in _registry.packages)
+            _searchQuery = EditorGUILayout.TextField(
+                new GUIContent("Search", "Filter the list below by name or description"), _searchQuery);
+
+            using (new EditorGUILayout.HorizontalScope())
             {
-                DrawPackageRow(pkg, _uiState[pkg.name]);
+                if (GUILayout.Button(new GUIContent("Select All", "Check every package currently shown below")))
+                {
+                    SetSelectedForVisible(true);
+                }
+
+                if (GUILayout.Button(new GUIContent("Select None", "Uncheck every package currently shown below")))
+                {
+                    SetSelectedForVisible(false);
+                }
+            }
+
+            EditorGUILayout.Space();
+
+            var visible = GetFilteredPackages().ToList();
+
+            _scroll = EditorGUILayout.BeginScrollView(_scroll);
+            if (visible.Count == 0)
+            {
+                EditorGUILayout.HelpBox("No packages match your search.", MessageType.Info);
+            }
+            else
+            {
+                foreach (var pkg in visible)
+                {
+                    DrawPackageRow(pkg, _uiState[pkg.name]);
+                }
             }
 
             EditorGUILayout.EndScrollView();
 
             EditorGUILayout.Space();
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                GUILayout.FlexibleSpace();
-                GUI.enabled = !_isApplying;
-                if (GUILayout.Button("Apply to Project", GUILayout.Width(150), GUILayout.Height(28)))
-                {
-                    ApplyToProject();
-                }
 
-                GUI.enabled = true;
+            if (_pendingDiff != null)
+            {
+                DrawPendingDiff();
+            }
+            else
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.FlexibleSpace();
+                    GUI.enabled = !_isApplying;
+                    if (GUILayout.Button(
+                            new GUIContent("Apply to Project", "Review what will change before installing/removing anything"),
+                            GUILayout.Width(150), GUILayout.Height(28)))
+                    {
+                        BeginApply();
+                    }
+
+                    GUI.enabled = true;
+                }
             }
 
             if (_applyStatus != null)
             {
                 EditorGUILayout.HelpBox(_applyStatus, _applyIsError ? MessageType.Error : MessageType.Info);
+            }
+        }
+
+        private void SetSelectedForVisible(bool selected)
+        {
+            foreach (var pkg in GetFilteredPackages())
+            {
+                var state = _uiState[pkg.name];
+                state.selected = selected;
+                if (selected && state.versions == null && !state.isFetchingVersions)
+                {
+                    FetchVersions(pkg, state);
+                }
             }
         }
 
@@ -306,7 +415,7 @@ namespace AreezKhan79.PackageHub.Editor
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         EditorGUILayout.LabelField(url);
-                        if (GUILayout.Button("Remove", GUILayout.Width(60)))
+                        if (GUILayout.Button(new GUIContent("Remove", "Stop reading packages from this registry"), GUILayout.Width(60)))
                         {
                             urlToRemove = url;
                         }
@@ -323,7 +432,9 @@ namespace AreezKhan79.PackageHub.Editor
                 {
                     _newRegistryUrl = EditorGUILayout.TextField(_newRegistryUrl);
                     GUI.enabled = !string.IsNullOrWhiteSpace(_newRegistryUrl);
-                    if (GUILayout.Button("Add Registry", GUILayout.Width(100)))
+                    if (GUILayout.Button(
+                            new GUIContent("Add Registry", "Fetch and merge packages from this registry.json URL"),
+                            GUILayout.Width(100)))
                     {
                         settings.AddRegistry(_newRegistryUrl.Trim());
                         _newRegistryUrl = "";
@@ -346,7 +457,8 @@ namespace AreezKhan79.PackageHub.Editor
                 {
                     var wasSelected = state.selected;
                     state.selected = EditorGUILayout.ToggleLeft(
-                        pkg.displayName, state.selected, EditorStyles.boldLabel, GUILayout.Width(220));
+                        new GUIContent(pkg.displayName, pkg.repoUrl), state.selected, EditorStyles.boldLabel,
+                        GUILayout.Width(220));
 
                     if (state.selected && !wasSelected && state.versions == null && !state.isFetchingVersions)
                     {
@@ -357,7 +469,9 @@ namespace AreezKhan79.PackageHub.Editor
 
                     if (!string.IsNullOrEmpty(state.installedVersion))
                     {
-                        EditorGUILayout.LabelField($"installed: {state.installedVersion}", GUILayout.Width(160));
+                        EditorGUILayout.LabelField(
+                            new GUIContent($"installed: {state.installedVersion}", "Version currently in this project's manifest.json"),
+                            GUILayout.Width(160));
                     }
                 }
 
@@ -367,7 +481,9 @@ namespace AreezKhan79.PackageHub.Editor
                 {
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        EditorGUILayout.LabelField("Version", GUILayout.Width(60));
+                        EditorGUILayout.LabelField(
+                            new GUIContent("Version", "Which git tag to install. Sorted newest first when tags look like semver."),
+                            GUILayout.Width(60));
 
                         if (state.isFetchingVersions)
                         {
@@ -383,8 +499,8 @@ namespace AreezKhan79.PackageHub.Editor
                         }
                         else if (state.versions != null && state.versions.Length > 0)
                         {
-                            state.selectedVersionIndex =
-                                EditorGUILayout.Popup(Mathf.Max(state.selectedVersionIndex, 0), state.versions);
+                            state.selectedVersionIndex = EditorGUILayout.Popup(
+                                Mathf.Max(state.selectedVersionIndex, 0), state.versions);
                         }
                         else if (state.versions != null)
                         {
@@ -405,10 +521,9 @@ namespace AreezKhan79.PackageHub.Editor
             EditorGUILayout.Space(4);
         }
 
-        private void ApplyToProject()
+        private void BeginApply()
         {
-            var toAdd = new List<string>();
-            var toRemove = new List<string>();
+            var diff = new ApplyDiff();
 
             foreach (var pkg in _registry.packages)
             {
@@ -420,31 +535,72 @@ namespace AreezKhan79.PackageHub.Editor
                     {
                         _applyStatus = $"Cannot add {pkg.displayName}: no version selected or available yet.";
                         _applyIsError = true;
+                        _pendingDiff = null;
                         return;
                     }
 
                     var tag = state.versions[state.selectedVersionIndex];
                     if (state.installedVersion == tag) continue;
 
-                    toAdd.Add($"{pkg.repoUrl}#{tag}");
+                    diff.ToAdd.Add($"{pkg.repoUrl}#{tag}");
+                    diff.SummaryLines.Add(state.wasInstalled
+                        ? $"Upgrade {pkg.displayName}: {state.installedVersion} -> {tag}"
+                        : $"Add {pkg.displayName} @ {tag}");
                 }
                 else if (state.wasInstalled)
                 {
-                    toRemove.Add(pkg.name);
+                    diff.ToRemove.Add(pkg.name);
+                    diff.SummaryLines.Add($"Remove {pkg.displayName}");
                 }
             }
 
-            if (toAdd.Count == 0 && toRemove.Count == 0)
+            if (diff.ToAdd.Count == 0 && diff.ToRemove.Count == 0)
             {
                 _applyStatus = "Nothing to change - selections already match the project.";
                 _applyIsError = false;
+                _pendingDiff = null;
                 return;
             }
 
+            _applyStatus = null;
+            _pendingDiff = diff;
+        }
+
+        private void DrawPendingDiff()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Pending changes", EditorStyles.boldLabel);
+                foreach (var line in _pendingDiff.SummaryLines)
+                {
+                    EditorGUILayout.LabelField("• " + line, EditorStyles.wordWrappedMiniLabel);
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUI.enabled = !_isApplying;
+                    if (GUILayout.Button(new GUIContent("Confirm", "Actually install/remove the packages listed above")))
+                    {
+                        ExecuteDiff(_pendingDiff);
+                    }
+
+                    if (GUILayout.Button(new GUIContent("Cancel", "Discard this preview without changing anything")))
+                    {
+                        _pendingDiff = null;
+                    }
+
+                    GUI.enabled = true;
+                }
+            }
+        }
+
+        private void ExecuteDiff(ApplyDiff diff)
+        {
             _isApplying = true;
             _applyStatus = "Applying changes...";
             _applyIsError = false;
-            _pendingRequest = Client.AddAndRemove(toAdd.ToArray(), toRemove.ToArray());
+            _pendingDiff = null;
+            _pendingRequest = Client.AddAndRemove(diff.ToAdd.ToArray(), diff.ToRemove.ToArray());
             EditorApplication.update += PollApplyRequest;
         }
 
