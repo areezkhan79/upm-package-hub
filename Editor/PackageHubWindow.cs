@@ -722,46 +722,46 @@ namespace AreezKhan79.PackageHub.Editor
         private void DrawCreateRegistrySection()
         {
             _showCreateRegistry = EditorGUILayout.Foldout(_showCreateRegistry, "Create New Registry", true);
-            if (!_showCreateRegistry)
+
+            if (_showCreateRegistry)
             {
-                EditorGUILayout.Space();
-                return;
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        "Creates a new GitHub repository with a starter registry.json and adds it to your " +
+                        "registries above - no terminal or git commands needed. Requires a GitHub token with " +
+                        "repo-creation rights, set in Settings above.",
+                        EditorStyles.wordWrappedMiniLabel);
+
+                    _newRegistryRepoName = EditorGUILayout.TextField(
+                        new GUIContent("Repo name", "The new GitHub repository's name"), _newRegistryRepoName);
+                    _newRegistryDescription = EditorGUILayout.TextField(
+                        new GUIContent("Description", "Shown on the GitHub repo page"), _newRegistryDescription);
+                    _newRegistryPrivate = EditorGUILayout.Toggle(
+                        new GUIContent("Private", "Private repos also require a token with 'repo' scope for browsing"),
+                        _newRegistryPrivate);
+
+                    if (string.IsNullOrEmpty(GitHubToken))
+                    {
+                        EditorGUILayout.HelpBox("Add a GitHub token above first.", MessageType.Warning);
+                    }
+
+                    GUI.enabled = !_isCreatingRegistry && !string.IsNullOrEmpty(GitHubToken) &&
+                                  !string.IsNullOrWhiteSpace(_newRegistryRepoName);
+                    if (GUILayout.Button(_isCreatingRegistry ? "Creating..." : "Create Registry"))
+                    {
+                        CreateNewRegistry();
+                    }
+
+                    GUI.enabled = true;
+                }
             }
 
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            // Rendered outside the foldout body so it's still visible even after
+            // a successful creation collapses the section.
+            if (_createRegistryStatus != null)
             {
-                EditorGUILayout.LabelField(
-                    "Creates a new GitHub repository with a starter registry.json and adds it to your " +
-                    "registries above - no terminal or git commands needed. Requires a GitHub token with " +
-                    "repo-creation rights, set in Settings above.",
-                    EditorStyles.wordWrappedMiniLabel);
-
-                _newRegistryRepoName = EditorGUILayout.TextField(
-                    new GUIContent("Repo name", "The new GitHub repository's name"), _newRegistryRepoName);
-                _newRegistryDescription = EditorGUILayout.TextField(
-                    new GUIContent("Description", "Shown on the GitHub repo page"), _newRegistryDescription);
-                _newRegistryPrivate = EditorGUILayout.Toggle(
-                    new GUIContent("Private", "Private repos also require a token with 'repo' scope for browsing"),
-                    _newRegistryPrivate);
-
-                if (string.IsNullOrEmpty(GitHubToken))
-                {
-                    EditorGUILayout.HelpBox("Add a GitHub token above first.", MessageType.Warning);
-                }
-
-                GUI.enabled = !_isCreatingRegistry && !string.IsNullOrEmpty(GitHubToken) &&
-                              !string.IsNullOrWhiteSpace(_newRegistryRepoName);
-                if (GUILayout.Button(_isCreatingRegistry ? "Creating..." : "Create Registry"))
-                {
-                    CreateNewRegistry();
-                }
-
-                GUI.enabled = true;
-
-                if (_createRegistryStatus != null)
-                {
-                    EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
-                }
+                EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
             }
 
             EditorGUILayout.Space();
