@@ -28,6 +28,7 @@ namespace AreezKhan79.PackageHub.Editor
             public bool isFetchingVersions;
             public string fetchError;
             public string installedVersion;
+            public string pendingPresetVersion;
         }
 
         private class ApplyDiff
@@ -213,6 +214,13 @@ namespace AreezKhan79.PackageHub.Editor
                             : -1;
                         state.selectedVersionIndex = idx >= 0 ? idx : 0;
                     }
+
+                    if (!string.IsNullOrEmpty(state.pendingPresetVersion))
+                    {
+                        var presetIdx = Array.IndexOf(state.versions, state.pendingPresetVersion);
+                        if (presetIdx >= 0) state.selectedVersionIndex = presetIdx;
+                        state.pendingPresetVersion = null;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -332,6 +340,20 @@ namespace AreezKhan79.PackageHub.Editor
                 {
                     SetSelectedForVisible(false);
                 }
+
+                GUILayout.FlexibleSpace();
+
+                if (GUILayout.Button(new GUIContent("Save Preset...",
+                        "Save the current checked packages + versions as a reusable .json file")))
+                {
+                    SavePresetToFile();
+                }
+
+                if (GUILayout.Button(new GUIContent("Load Preset...",
+                        "Load a .json preset, replacing current selections to match it exactly")))
+                {
+                    LoadPresetFromFile();
+                }
             }
 
             EditorGUILayout.Space();
@@ -385,6 +407,103 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 EditorGUILayout.HelpBox(_applyStatus, _applyIsError ? MessageType.Error : MessageType.Info);
             }
+        }
+
+        private void SavePresetToFile()
+        {
+            var entries = new List<PresetEntry>();
+            foreach (var pkg in _registry.packages)
+            {
+                var state = _uiState[pkg.name];
+                if (!state.selected) continue;
+                if (state.versions == null || state.selectedVersionIndex < 0 ||
+                    state.selectedVersionIndex >= state.versions.Length) continue;
+
+                entries.Add(new PresetEntry
+                {
+                    packageName = pkg.name,
+                    version = state.versions[state.selectedVersionIndex]
+                });
+            }
+
+            if (entries.Count == 0)
+            {
+                _applyStatus = "Nothing selected (with a resolved version) to save as a preset.";
+                _applyIsError = true;
+                return;
+            }
+
+            var path = EditorUtility.SaveFilePanel("Save Package Preset", "", "preset", "json");
+            if (string.IsNullOrEmpty(path)) return;
+
+            var preset = new Preset
+            {
+                presetName = Path.GetFileNameWithoutExtension(path),
+                entries = entries.ToArray()
+            };
+
+            File.WriteAllText(path, JsonUtility.ToJson(preset, true));
+            _applyStatus = $"Saved preset '{preset.presetName}' with {entries.Count} package(s) to {path}.";
+            _applyIsError = false;
+        }
+
+        private void LoadPresetFromFile()
+        {
+            var path = EditorUtility.OpenFilePanel("Load Package Preset", "", "json");
+            if (string.IsNullOrEmpty(path)) return;
+
+            Preset preset;
+            try
+            {
+                preset = JsonUtility.FromJson<Preset>(File.ReadAllText(path));
+            }
+            catch (Exception e)
+            {
+                _applyStatus = $"Failed to load preset: {e.Message}";
+                _applyIsError = true;
+                return;
+            }
+
+            if (preset?.entries == null || preset.entries.Length == 0)
+            {
+                _applyStatus = "Preset file is empty or invalid.";
+                _applyIsError = true;
+                return;
+            }
+
+            var wanted = preset.entries.ToDictionary(e => e.packageName, e => e.version);
+            var missing = new List<string>(wanted.Keys);
+
+            foreach (var pkg in _registry.packages)
+            {
+                var state = _uiState[pkg.name];
+                if (wanted.TryGetValue(pkg.name, out var version))
+                {
+                    missing.Remove(pkg.name);
+                    state.selected = true;
+
+                    if (state.versions != null)
+                    {
+                        var idx = Array.IndexOf(state.versions, version);
+                        state.selectedVersionIndex = idx >= 0 ? idx : 0;
+                    }
+                    else
+                    {
+                        state.pendingPresetVersion = version;
+                        if (!state.isFetchingVersions) FetchVersions(pkg, state);
+                    }
+                }
+                else
+                {
+                    state.selected = false;
+                }
+            }
+
+            _pendingDiff = null;
+            _applyStatus = missing.Count > 0
+                ? $"Preset '{preset.presetName}' applied. Not found in configured registries: {string.Join(", ", missing)}"
+                : $"Preset '{preset.presetName}' applied. Review versions, then Apply to Project.";
+            _applyIsError = missing.Count > 0;
         }
 
         private static string GetCategory(PackageEntry pkg) =>

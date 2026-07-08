@@ -17,7 +17,7 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
 [releases](https://github.com/areezkhan79/upm-package-hub/tags):
 
 ```json
-"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.2.0"
+"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.5.0"
 ```
 
 ## Usage
@@ -27,18 +27,33 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
    URL pointing at a `registry.json` file — e.g. a `raw.githubusercontent.com`
    link).
 3. The tool fetches every configured registry, merges their package lists,
-   and shows each one with a checkbox and a version dropdown (versions are
-   fetched live from that package's git tags — never stale, no need to update
-   the registry when you cut a release).
+   and shows each one grouped by category, with a checkbox and a version
+   dropdown (versions are fetched live from that package's git tags and
+   sorted newest-first — never stale, no need to update the registry when you
+   cut a release).
 4. Packages already present in the current project's `manifest.json` are
    pre-checked, showing their currently installed version.
-5. Check/uncheck what you want, pick versions, click **Apply to Project** —
-   this calls Unity's own `UnityEditor.PackageManager.Client.AddAndRemove`
-   under the hood, the same API the built-in Package Manager UI uses.
+5. Use **Search** to filter, **Select All** / **Select None** for bulk
+   selection.
+6. Check/uncheck what you want, pick versions, click **Apply to Project** —
+   this shows a preview of exactly what will change (adds/removes/upgrades)
+   before anything happens. Click **Confirm** to actually apply it, which
+   calls Unity's own `UnityEditor.PackageManager.Client.AddAndRemove` under
+   the hood, the same API the built-in Package Manager UI uses.
 
 Registry settings are stored per-project at `ProjectSettings/PackageHubSettings.asset`,
 so if that file is committed to your game project's own repo, the whole team
 gets the same registries configured automatically.
+
+## Presets
+
+Use **Save Preset...** to export your current checked packages + chosen
+versions as a portable `.json` file (via the native save dialog — put it
+anywhere, share it, commit it to a separate repo). **Load Preset...** reads
+one back and replaces the current selections to match it exactly (packages
+not in the preset get unchecked). This is the fast way to set up a new
+project: save a "starter kit" preset once, then load + apply it in every new
+project going forward.
 
 ## Adding a package to a registry
 
