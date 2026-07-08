@@ -1148,10 +1148,11 @@ namespace AreezKhan79.PackageHub.Editor
             _createPackageStatus = "Initializing git repository...";
             Repaint();
 
-            if (!RunGit(packageFolder, "init", out _, out var initErr) ||
-                !RunGit(packageFolder, "add -A", out _, out var addErr) ||
-                !RunGit(packageFolder, "commit -m \"Initial package scaffold\"", out _, out var commitErr) ||
-                !RunGit(packageFolder, "branch -M main", out _, out var branchErr))
+            string initErr = "", addErr = "", commitErr = "", branchErr = "";
+            if (!RunGit(packageFolder, "init", out _, out initErr) ||
+                !RunGit(packageFolder, "add -A", out _, out addErr) ||
+                !RunGit(packageFolder, "commit -m \"Initial package scaffold\"", out _, out commitErr) ||
+                !RunGit(packageFolder, "branch -M main", out _, out branchErr))
             {
                 _isCreatingPackage = false;
                 _createPackageStatus = $"Git init failed: {initErr}{addErr}{commitErr}{branchErr}";
@@ -1208,10 +1209,11 @@ namespace AreezKhan79.PackageHub.Editor
 
             var remoteUrl = $"https://github.com/{repo.owner.login}/{repo.name}.git";
 
-            if (!RunGit(packageFolder, $"remote add origin {remoteUrl}", out _, out var remoteErr) ||
-                !RunGit(packageFolder, "push -u origin main", out _, out var pushErr) ||
-                !RunGit(packageFolder, "tag -a v0.1.0 -m \"v0.1.0 - initial package\"", out _, out var tagErr) ||
-                !RunGit(packageFolder, "push origin v0.1.0", out _, out var pushTagErr))
+            string remoteErr = "", pushErr = "", tagErr = "", pushTagErr = "";
+            if (!RunGit(packageFolder, $"remote add origin {remoteUrl}", out _, out remoteErr) ||
+                !RunGit(packageFolder, "push -u origin main", out _, out pushErr) ||
+                !RunGit(packageFolder, "tag -a v0.1.0 -m \"v0.1.0 - initial package\"", out _, out tagErr) ||
+                !RunGit(packageFolder, "push origin v0.1.0", out _, out pushTagErr))
             {
                 _isCreatingPackage = false;
                 _createPackageStatus = $"Repo created, but push failed: {remoteErr}{pushErr}{tagErr}{pushTagErr}";
