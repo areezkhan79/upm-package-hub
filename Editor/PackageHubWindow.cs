@@ -13,8 +13,6 @@ namespace AreezKhan79.PackageHub.Editor
 {
     internal class PackageHubWindow : EditorWindow
     {
-        private const string RegistryUrl = "https://raw.githubusercontent.com/areezkhan79/upm-registry/main/registry.json";
-
         private static readonly Regex ManifestEntryRegex =
             new Regex("\"(?<name>[^\"]+)\"\\s*:\\s*\"(?<value>[^\"]+)\"", RegexOptions.Compiled);
 
@@ -40,6 +38,9 @@ namespace AreezKhan79.PackageHub.Editor
         private bool _applyIsError;
         private AddAndRemoveRequest _pendingRequest;
 
+        private bool _showSettings;
+        private string _newRegistryUrl = "";
+
         [MenuItem("Window/Package Hub")]
         private static void Open()
         {
@@ -50,7 +51,8 @@ namespace AreezKhan79.PackageHub.Editor
 
         private void OnEnable()
         {
-            FetchRegistry();
+            _showSettings = PackageHubSettings.instance.RegistryUrls.Count == 0;
+            FetchAllRegistries();
         }
 
         private void OnDisable()
@@ -58,35 +60,60 @@ namespace AreezKhan79.PackageHub.Editor
             EditorApplication.update -= PollApplyRequest;
         }
 
-        private void FetchRegistry()
+        private void FetchAllRegistries()
         {
-            _isLoadingRegistry = true;
-            _loadError = null;
-            var request = UnityWebRequest.Get(RegistryUrl);
-            var op = request.SendWebRequest();
-            op.completed += _ =>
+            var urls = PackageHubSettings.instance.RegistryUrls;
+            _registry = new Registry { packages = Array.Empty<PackageEntry>() };
+
+            if (urls.Count == 0)
             {
                 _isLoadingRegistry = false;
-
-                if (request.result != UnityWebRequest.Result.Success)
-                {
-                    _loadError = $"Failed to load registry: {request.error}";
-                    Repaint();
-                    return;
-                }
-
-                try
-                {
-                    _registry = JsonUtility.FromJson<Registry>(request.downloadHandler.text);
-                    BuildUiState();
-                }
-                catch (Exception e)
-                {
-                    _loadError = $"Failed to parse registry.json: {e.Message}";
-                }
-
+                _loadError = null;
+                BuildUiState();
                 Repaint();
-            };
+                return;
+            }
+
+            _isLoadingRegistry = true;
+            _loadError = null;
+
+            var pending = urls.Count;
+            var collected = new List<PackageEntry>();
+            var errors = new List<string>();
+
+            foreach (var url in urls)
+            {
+                var request = UnityWebRequest.Get(url);
+                var op = request.SendWebRequest();
+                op.completed += _ =>
+                {
+                    if (request.result == UnityWebRequest.Result.Success)
+                    {
+                        try
+                        {
+                            var parsed = JsonUtility.FromJson<Registry>(request.downloadHandler.text);
+                            if (parsed?.packages != null) collected.AddRange(parsed.packages);
+                        }
+                        catch (Exception e)
+                        {
+                            errors.Add($"{url}: failed to parse - {e.Message}");
+                        }
+                    }
+                    else
+                    {
+                        errors.Add($"{url}: {request.error}");
+                    }
+
+                    pending--;
+                    if (pending > 0) return;
+
+                    _isLoadingRegistry = false;
+                    _registry = new Registry { packages = collected.ToArray() };
+                    _loadError = errors.Count > 0 ? string.Join("\n", errors) : null;
+                    BuildUiState();
+                    Repaint();
+                };
+            }
         }
 
         private void BuildUiState()
@@ -194,29 +221,38 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 EditorGUILayout.LabelField("Package Hub", EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Refresh Registry", GUILayout.Width(130)))
+                if (GUILayout.Button("Refresh", GUILayout.Width(70)))
                 {
-                    FetchRegistry();
+                    FetchAllRegistries();
                 }
             }
 
             EditorGUILayout.Space();
 
+            DrawSettings();
+
             if (_isLoadingRegistry)
             {
-                EditorGUILayout.HelpBox("Loading registry...", MessageType.Info);
+                EditorGUILayout.HelpBox("Loading registries...", MessageType.Info);
                 return;
             }
 
             if (_loadError != null)
             {
                 EditorGUILayout.HelpBox(_loadError, MessageType.Error);
+            }
+
+            if (PackageHubSettings.instance.RegistryUrls.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "No registries configured yet. Add a registry.json URL above to start browsing packages.",
+                    MessageType.Info);
                 return;
             }
 
             if (_registry?.packages == null || _registry.packages.Length == 0)
             {
-                EditorGUILayout.HelpBox("No packages found in registry.", MessageType.Warning);
+                EditorGUILayout.HelpBox("Registries are configured but returned no packages.", MessageType.Warning);
                 return;
             }
 
@@ -245,6 +281,61 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 EditorGUILayout.HelpBox(_applyStatus, _applyIsError ? MessageType.Error : MessageType.Info);
             }
+        }
+
+        private void DrawSettings()
+        {
+            _showSettings = EditorGUILayout.Foldout(_showSettings, "Settings", true);
+            if (!_showSettings)
+            {
+                EditorGUILayout.Space();
+                return;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "Registries are raw registry.json URLs. Add one to browse its packages here.",
+                    EditorStyles.wordWrappedMiniLabel);
+
+                var settings = PackageHubSettings.instance;
+                string urlToRemove = null;
+
+                foreach (var url in settings.RegistryUrls)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField(url);
+                        if (GUILayout.Button("Remove", GUILayout.Width(60)))
+                        {
+                            urlToRemove = url;
+                        }
+                    }
+                }
+
+                if (urlToRemove != null)
+                {
+                    settings.RemoveRegistry(urlToRemove);
+                    FetchAllRegistries();
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _newRegistryUrl = EditorGUILayout.TextField(_newRegistryUrl);
+                    GUI.enabled = !string.IsNullOrWhiteSpace(_newRegistryUrl);
+                    if (GUILayout.Button("Add Registry", GUILayout.Width(100)))
+                    {
+                        settings.AddRegistry(_newRegistryUrl.Trim());
+                        _newRegistryUrl = "";
+                        GUI.FocusControl(null);
+                        FetchAllRegistries();
+                    }
+
+                    GUI.enabled = true;
+                }
+            }
+
+            EditorGUILayout.Space();
         }
 
         private void DrawPackageRow(PackageEntry pkg, PackageUiState state)

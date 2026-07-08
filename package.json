@@ -1,8 +1,8 @@
 {
   "name": "com.areezkhan79.packagehub",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "displayName": "Package Hub",
-  "description": "Dashboard for browsing and bulk-installing areezkhan79's personal Unity package registry via git URLs, with per-package version selection.",
+  "description": "Dashboard for browsing and bulk-installing packages from configurable registries via git URLs, with per-package version selection.",
   "unity": "2021.3",
   "license": "MIT",
   "author": {
