@@ -680,6 +680,7 @@ namespace AreezKhan79.PackageHub.Editor
                 if (urlToRemove != null)
                 {
                     settings.RemoveRegistry(urlToRemove);
+                    _createRegistryStatus = null;
                     FetchAllRegistries();
                 }
 
@@ -761,7 +762,14 @@ namespace AreezKhan79.PackageHub.Editor
             // a successful creation collapses the section.
             if (_createRegistryStatus != null)
             {
-                EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
+                    if (GUILayout.Button("x", GUILayout.Width(20), GUILayout.Height(20)))
+                    {
+                        _createRegistryStatus = null;
+                    }
+                }
             }
 
             EditorGUILayout.Space();
