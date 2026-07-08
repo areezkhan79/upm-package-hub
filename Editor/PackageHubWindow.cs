@@ -106,6 +106,11 @@ namespace AreezKhan79.PackageHub.Editor
                 }
 
                 _uiState[pkg.name] = state;
+
+                if (state.selected)
+                {
+                    FetchVersions(pkg, state);
+                }
             }
         }
 
@@ -290,9 +295,17 @@ namespace AreezKhan79.PackageHub.Editor
                             state.selectedVersionIndex =
                                 EditorGUILayout.Popup(Mathf.Max(state.selectedVersionIndex, 0), state.versions);
                         }
-                        else
+                        else if (state.versions != null)
                         {
                             EditorGUILayout.LabelField("No tags found for this repo");
+                        }
+                        else
+                        {
+                            EditorGUILayout.LabelField("Not fetched yet");
+                            if (GUILayout.Button("Fetch", GUILayout.Width(60)))
+                            {
+                                FetchVersions(pkg, state);
+                            }
                         }
                     }
                 }
