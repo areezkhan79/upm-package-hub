@@ -17,25 +17,31 @@ Add to `Packages/manifest.json`, pinned to a released tag from this repo's
 [releases](https://github.com/areezkhan79/upm-package-hub/tags):
 
 ```json
-"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.9.0"
+"com.areezkhan79.packagehub": "https://github.com/areezkhan79/upm-package-hub.git#v0.10.0"
 ```
 
 ## Usage
 
-1. Open **Window > Package Hub**.
-2. On first run, expand **Settings** and add one or more registry URLs (a raw
-   URL pointing at a `registry.json` file — e.g. a `raw.githubusercontent.com`
-   link).
-3. The tool fetches every configured registry, merges their package lists,
-   and shows each one grouped by category, with a checkbox and a version
-   dropdown (versions are fetched live from that package's git tags and
-   sorted newest-first — never stale, no need to update the registry when you
-   cut a release).
-4. Packages already present in the current project's `manifest.json` are
-   pre-checked, showing their currently installed version.
-5. Use **Search** to filter, **Select All** / **Select None** for bulk
+Open **Window > Package Hub**. The window has two tabs:
+
+- **Packages** — the everyday view. Browse, check/uncheck, pick versions, apply.
+- **Manage** — Settings (registries, GitHub token), Create New Registry, Create New Package. Tucked away here so it doesn't clutter the view you'll use most of the time.
+
+On first run, switch to **Manage** and add one or more registry URLs (a raw
+URL pointing at a `registry.json` file — e.g. a `raw.githubusercontent.com`
+link). Back on **Packages**:
+
+1. Every configured registry's packages are merged and shown grouped by
+   category, each with a colored status dot, a checkbox, and a version
+   dropdown (versions are fetched live from git tags and sorted
+   newest-first — never stale, no need to update the registry when you cut a
+   release). The dot means: **blue** = will be added, **green** = up to date,
+   **orange** = version will change or package will be removed.
+2. Packages already present in the current project's `manifest.json` are
+   pre-checked, showing a "remove (vX)" label when unchecked.
+3. Use **Search** to filter, **Select All** / **Select None** for bulk
    selection.
-6. Check/uncheck what you want, pick versions, click **Apply to Project** —
+4. Check/uncheck what you want, pick versions, click **Apply to Project** —
    this shows a preview of exactly what will change (adds/removes/upgrades)
    before anything happens. Click **Confirm** to actually apply it, which
    calls Unity's own `UnityEditor.PackageManager.Client.AddAndRemove` under
@@ -63,24 +69,26 @@ that package auto-checks its dependencies too, and locks their checkbox
 
 ## GitHub token
 
-Optional — expand **Settings** and paste a GitHub Personal Access Token to
-raise the unauthenticated API rate limit (60 requests/hour, easy to hit with
-many packages) and to enable browsing private repos. No scopes are needed for
-public repos; use the `repo` scope for private ones. Stored via `EditorPrefs`
-on your machine only, never written to any file that gets committed.
+Optional — on the **Manage** tab, expand **Settings** and paste a GitHub
+Personal Access Token to raise the unauthenticated API rate limit (60
+requests/hour, easy to hit with many packages) and to enable browsing private
+repos. No scopes are needed for public repos; use the `repo` scope for
+private ones. Stored via `EditorPrefs` on your machine only, never written to
+any file that gets committed.
 
 ## Creating a new registry
 
-Expand **Create New Registry**, fill in a repo name/description, choose
-public or private, click **Create Registry**. This calls the GitHub API to
-create a new repo, adds a starter `registry.json` to it (via GitHub's
-Contents API — no local git needed), and adds it to your configured
-registries automatically. Requires a GitHub token (see below) with
+On the **Manage** tab, expand **Create New Registry**, fill in a repo
+name/description, choose public or private, click **Create Registry**. This
+calls the GitHub API to create a new repo, adds a starter `registry.json` to
+it (via GitHub's Contents API — no local git needed), and adds it to your
+configured registries automatically. Requires a GitHub token (see below) with
 repo-creation rights.
 
 ## Creating a new package
 
-Expand **Create New Package**, fill in the package name (reverse-domain,
+On the **Manage** tab, expand **Create New Package**, fill in the package
+name (reverse-domain,
 e.g. `com.yourname.module`), display name, description, optional category,
 pick a local parent folder, and which registry to publish into, then click
 **Create Package**. This:

@@ -99,6 +99,13 @@ namespace AreezKhan79.PackageHub.Editor
         private string _createPackageStatus;
         private bool _createPackageIsError;
 
+        private static readonly string[] TabLabels = { "Packages", "Manage" };
+        private int _activeTab;
+
+        private static readonly Color UpToDateColor = new Color(0.35f, 0.75f, 0.35f);
+        private static readonly Color UpdateAvailableColor = new Color(0.85f, 0.65f, 0.2f);
+        private static readonly Color NewSelectionColor = new Color(0.4f, 0.65f, 0.9f);
+
         [MenuItem("Window/Package Hub")]
         private static void Open()
         {
@@ -330,22 +337,44 @@ namespace AreezKhan79.PackageHub.Editor
 
         private void OnGUI()
         {
-            EditorGUILayout.Space();
-            using (new EditorGUILayout.HorizontalScope())
+            DrawToolbar();
+
+            if (_activeTab == 1)
             {
-                EditorGUILayout.LabelField("Package Hub", EditorStyles.boldLabel);
+                DrawManageTab();
+            }
+            else
+            {
+                DrawPackagesTab();
+            }
+        }
+
+        private void DrawToolbar()
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                _activeTab = GUILayout.Toolbar(_activeTab, TabLabels, EditorStyles.toolbarButton, GUILayout.Width(160));
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button(new GUIContent("Refresh", "Re-fetch registry.json from all configured registries"), GUILayout.Width(70)))
+                if (GUILayout.Button(
+                        new GUIContent("Refresh", "Re-fetch registry.json from all configured registries"),
+                        EditorStyles.toolbarButton, GUILayout.Width(70)))
                 {
                     FetchAllRegistries();
                 }
             }
+        }
 
+        private void DrawManageTab()
+        {
             EditorGUILayout.Space();
-
             DrawSettings();
             DrawCreateRegistrySection();
             DrawCreatePackageSection();
+        }
+
+        private void DrawPackagesTab()
+        {
+            EditorGUILayout.Space();
 
             if (_isLoadingRegistry)
             {
@@ -361,7 +390,7 @@ namespace AreezKhan79.PackageHub.Editor
             if (PackageHubSettings.instance.RegistryUrls.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    "No registries configured yet. Add a registry.json URL above to start browsing packages.",
+                    "No registries configured yet. Switch to the Manage tab to add one.",
                     MessageType.Info);
                 return;
             }
@@ -1329,6 +1358,85 @@ namespace AreezKhan79.PackageHub.Editor
             };
         }
 
+        private static readonly Dictionary<int, GUIStyle> DotStyleCache = new Dictionary<int, GUIStyle>();
+
+        private static GUIStyle GetDotStyle(Color color)
+        {
+            var key = color.GetHashCode();
+            if (!DotStyleCache.TryGetValue(key, out var style))
+            {
+                style = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = color } };
+                DotStyleCache[key] = style;
+            }
+
+            return style;
+        }
+
+        private static void DrawStatusDot(PackageUiState state)
+        {
+            Color? color = null;
+            string tooltip = null;
+
+            if (state.selected)
+            {
+                if (!state.wasInstalled)
+                {
+                    color = NewSelectionColor;
+                    tooltip = "Will be added";
+                }
+                else if (state.versions != null && state.selectedVersionIndex >= 0 &&
+                         state.selectedVersionIndex < state.versions.Length &&
+                         state.versions[state.selectedVersionIndex] == state.installedVersion)
+                {
+                    color = UpToDateColor;
+                    tooltip = $"Up to date ({state.installedVersion})";
+                }
+                else
+                {
+                    color = UpdateAvailableColor;
+                    tooltip = $"Installed: {state.installedVersion} - version will change on Apply";
+                }
+            }
+            else if (state.wasInstalled)
+            {
+                color = UpdateAvailableColor;
+                tooltip = "Will be removed on Apply";
+            }
+
+            EditorGUILayout.LabelField(
+                new GUIContent(color.HasValue ? "●" : " ", tooltip),
+                GetDotStyle(color ?? Color.clear), GUILayout.Width(14));
+        }
+
+        private void DrawVersionControl(PackageEntry pkg, PackageUiState state)
+        {
+            if (state.isFetchingVersions)
+            {
+                EditorGUILayout.LabelField("Fetching...", GUILayout.Width(140));
+            }
+            else if (state.fetchError != null)
+            {
+                if (GUILayout.Button(new GUIContent("Retry", state.fetchError), GUILayout.Width(60)))
+                {
+                    FetchVersions(pkg, state);
+                }
+            }
+            else if (state.versions != null && state.versions.Length > 0)
+            {
+                state.selectedVersionIndex = EditorGUILayout.Popup(
+                    Mathf.Max(state.selectedVersionIndex, 0), state.versions, GUILayout.Width(90));
+            }
+            else if (state.versions != null)
+            {
+                EditorGUILayout.LabelField(
+                    new GUIContent("no tags", "No git tags found for this repo"), GUILayout.Width(140));
+            }
+            else if (GUILayout.Button("Fetch versions", GUILayout.Width(100)))
+            {
+                FetchVersions(pkg, state);
+            }
+        }
+
         private void DrawPackageRow(PackageEntry pkg, PackageUiState state, Dictionary<string, List<string>> requiredByMap)
         {
             requiredByMap.TryGetValue(pkg.name, out var requiredBy);
@@ -1338,12 +1446,17 @@ namespace AreezKhan79.PackageHub.Editor
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    DrawStatusDot(state);
+
                     var wasSelected = state.selected;
 
                     GUI.enabled = !isLocked;
+                    var tooltip = string.IsNullOrEmpty(pkg.description)
+                        ? pkg.repoUrl
+                        : $"{pkg.description}\n\n{pkg.repoUrl}";
                     var newSelected = EditorGUILayout.ToggleLeft(
-                        new GUIContent(pkg.displayName, pkg.repoUrl), state.selected, EditorStyles.boldLabel,
-                        GUILayout.Width(220));
+                        new GUIContent(pkg.displayName, tooltip), state.selected, EditorStyles.boldLabel,
+                        GUILayout.Width(200));
                     GUI.enabled = true;
 
                     if (newSelected != wasSelected)
@@ -1360,64 +1473,29 @@ namespace AreezKhan79.PackageHub.Editor
 
                     GUILayout.FlexibleSpace();
 
-                    if (!string.IsNullOrEmpty(state.installedVersion))
+                    if (state.selected)
+                    {
+                        DrawVersionControl(pkg, state);
+                    }
+                    else if (state.wasInstalled)
                     {
                         EditorGUILayout.LabelField(
-                            new GUIContent($"installed: {state.installedVersion}", "Version currently in this project's manifest.json"),
-                            GUILayout.Width(160));
+                            new GUIContent($"remove ({state.installedVersion})",
+                                "Currently installed; will be removed on Apply"),
+                            GUILayout.Width(140));
                     }
                 }
-
-                EditorGUILayout.LabelField(pkg.description, EditorStyles.wordWrappedMiniLabel);
 
                 if (isLocked)
                 {
                     EditorGUILayout.LabelField(
-                        $"Required by: {string.Join(", ", requiredBy)}", EditorStyles.miniLabel);
-                }
-
-                if (state.selected)
-                {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField(
-                            new GUIContent("Version", "Which git tag to install. Sorted newest first when tags look like semver."),
-                            GUILayout.Width(60));
-
-                        if (state.isFetchingVersions)
-                        {
-                            EditorGUILayout.LabelField("Fetching versions...");
-                        }
-                        else if (state.fetchError != null)
-                        {
-                            EditorGUILayout.LabelField(state.fetchError);
-                            if (GUILayout.Button("Retry", GUILayout.Width(60)))
-                            {
-                                FetchVersions(pkg, state);
-                            }
-                        }
-                        else if (state.versions != null && state.versions.Length > 0)
-                        {
-                            state.selectedVersionIndex = EditorGUILayout.Popup(
-                                Mathf.Max(state.selectedVersionIndex, 0), state.versions);
-                        }
-                        else if (state.versions != null)
-                        {
-                            EditorGUILayout.LabelField("No tags found for this repo");
-                        }
-                        else
-                        {
-                            EditorGUILayout.LabelField("Not fetched yet");
-                            if (GUILayout.Button("Fetch", GUILayout.Width(60)))
-                            {
-                                FetchVersions(pkg, state);
-                            }
-                        }
-                    }
+                        new GUIContent($"Locked - required by: {string.Join(", ", requiredBy)}",
+                            "This package can't be unchecked while it's a dependency of a checked package"),
+                        EditorStyles.miniLabel);
                 }
             }
 
-            EditorGUILayout.Space(4);
+            EditorGUILayout.Space(2);
         }
 
         private void BeginApply()
