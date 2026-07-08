@@ -10,6 +10,7 @@ namespace AreezKhan79.PackageHub.Editor
         public string description;
         public string repoUrl;
         public string category;
+        public string[] dependencies;
     }
 
     [Serializable]

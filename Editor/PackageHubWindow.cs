@@ -359,6 +359,7 @@ namespace AreezKhan79.PackageHub.Editor
             EditorGUILayout.Space();
 
             var visible = GetFilteredPackages().ToList();
+            var requiredByMap = BuildRequiredByMap();
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
             if (visible.Count == 0)
@@ -374,7 +375,7 @@ namespace AreezKhan79.PackageHub.Editor
 
                 foreach (var group in groups)
                 {
-                    DrawCategoryGroup(group.Key, group.ToList());
+                    DrawCategoryGroup(group.Key, group.ToList(), requiredByMap);
                 }
             }
 
@@ -499,6 +500,15 @@ namespace AreezKhan79.PackageHub.Editor
                 }
             }
 
+            // Pull in any dependencies the preset didn't explicitly list.
+            foreach (var pkg in _registry.packages)
+            {
+                if (_uiState[pkg.name].selected)
+                {
+                    SelectPackageWithDependencies(pkg);
+                }
+            }
+
             _pendingDiff = null;
             _applyStatus = missing.Count > 0
                 ? $"Preset '{preset.presetName}' applied. Not found in configured registries: {string.Join(", ", missing)}"
@@ -509,7 +519,67 @@ namespace AreezKhan79.PackageHub.Editor
         private static string GetCategory(PackageEntry pkg) =>
             string.IsNullOrWhiteSpace(pkg.category) ? UncategorizedLabel : pkg.category;
 
-        private void DrawCategoryGroup(string category, List<PackageEntry> packages)
+        private PackageEntry FindPackage(string packageName)
+        {
+            if (_registry?.packages == null) return null;
+            foreach (var pkg in _registry.packages)
+            {
+                if (pkg.name == packageName) return pkg;
+            }
+
+            return null;
+        }
+
+        private Dictionary<string, List<string>> BuildRequiredByMap()
+        {
+            var map = new Dictionary<string, List<string>>();
+            if (_registry?.packages == null) return map;
+
+            foreach (var pkg in _registry.packages)
+            {
+                if (pkg.dependencies == null) continue;
+                if (!_uiState.TryGetValue(pkg.name, out var state) || !state.selected) continue;
+
+                foreach (var depName in pkg.dependencies)
+                {
+                    if (!map.TryGetValue(depName, out var requirers))
+                    {
+                        requirers = new List<string>();
+                        map[depName] = requirers;
+                    }
+
+                    requirers.Add(pkg.displayName);
+                }
+            }
+
+            return map;
+        }
+
+        private void SelectPackageWithDependencies(PackageEntry pkg, HashSet<string> visited = null)
+        {
+            if (visited == null) visited = new HashSet<string>();
+            if (!visited.Add(pkg.name)) return;
+
+            var state = _uiState[pkg.name];
+            state.selected = true;
+            if (state.versions == null && !state.isFetchingVersions)
+            {
+                FetchVersions(pkg, state);
+            }
+
+            if (pkg.dependencies == null) return;
+
+            foreach (var depName in pkg.dependencies)
+            {
+                var dep = FindPackage(depName);
+                if (dep != null && _uiState.ContainsKey(dep.name))
+                {
+                    SelectPackageWithDependencies(dep, visited);
+                }
+            }
+        }
+
+        private void DrawCategoryGroup(string category, List<PackageEntry> packages, Dictionary<string, List<string>> requiredByMap)
         {
             if (!_categoryFoldout.TryGetValue(category, out var expanded))
             {
@@ -527,7 +597,7 @@ namespace AreezKhan79.PackageHub.Editor
 
             foreach (var pkg in packages)
             {
-                DrawPackageRow(pkg, _uiState[pkg.name]);
+                DrawPackageRow(pkg, _uiState[pkg.name], requiredByMap);
             }
 
             EditorGUILayout.Space(4);
@@ -537,11 +607,13 @@ namespace AreezKhan79.PackageHub.Editor
         {
             foreach (var pkg in GetFilteredPackages())
             {
-                var state = _uiState[pkg.name];
-                state.selected = selected;
-                if (selected && state.versions == null && !state.isFetchingVersions)
+                if (selected)
                 {
-                    FetchVersions(pkg, state);
+                    SelectPackageWithDependencies(pkg);
+                }
+                else
+                {
+                    _uiState[pkg.name].selected = false;
                 }
             }
         }
@@ -603,20 +675,33 @@ namespace AreezKhan79.PackageHub.Editor
             EditorGUILayout.Space();
         }
 
-        private void DrawPackageRow(PackageEntry pkg, PackageUiState state)
+        private void DrawPackageRow(PackageEntry pkg, PackageUiState state, Dictionary<string, List<string>> requiredByMap)
         {
+            requiredByMap.TryGetValue(pkg.name, out var requiredBy);
+            var isLocked = requiredBy != null && requiredBy.Count > 0 && state.selected;
+
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     var wasSelected = state.selected;
-                    state.selected = EditorGUILayout.ToggleLeft(
+
+                    GUI.enabled = !isLocked;
+                    var newSelected = EditorGUILayout.ToggleLeft(
                         new GUIContent(pkg.displayName, pkg.repoUrl), state.selected, EditorStyles.boldLabel,
                         GUILayout.Width(220));
+                    GUI.enabled = true;
 
-                    if (state.selected && !wasSelected && state.versions == null && !state.isFetchingVersions)
+                    if (newSelected != wasSelected)
                     {
-                        FetchVersions(pkg, state);
+                        if (newSelected)
+                        {
+                            SelectPackageWithDependencies(pkg);
+                        }
+                        else
+                        {
+                            state.selected = false;
+                        }
                     }
 
                     GUILayout.FlexibleSpace();
@@ -630,6 +715,12 @@ namespace AreezKhan79.PackageHub.Editor
                 }
 
                 EditorGUILayout.LabelField(pkg.description, EditorStyles.wordWrappedMiniLabel);
+
+                if (isLocked)
+                {
+                    EditorGUILayout.LabelField(
+                        $"Required by: {string.Join(", ", requiredBy)}", EditorStyles.miniLabel);
+                }
 
                 if (state.selected)
                 {
