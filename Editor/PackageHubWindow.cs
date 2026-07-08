@@ -450,9 +450,30 @@ namespace AreezKhan79.PackageHub.Editor
                 }
             }
 
-            if (_applyStatus != null)
+            DrawStatusMessage(ref _applyStatus, _applyIsError, dismissable: false);
+        }
+
+        private static void DrawStatusMessage(ref string status, bool isError, bool dismissable = true)
+        {
+            if (status == null) return;
+
+            var current = status;
+            using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.HelpBox(_applyStatus, _applyIsError ? MessageType.Error : MessageType.Info);
+                EditorGUILayout.HelpBox(current, isError ? MessageType.Error : MessageType.Info);
+
+                using (new EditorGUILayout.VerticalScope(GUILayout.Width(20)))
+                {
+                    if (GUILayout.Button(new GUIContent("C", "Copy this message to the clipboard"), GUILayout.Width(20)))
+                    {
+                        EditorGUIUtility.systemCopyBuffer = current;
+                    }
+
+                    if (dismissable && GUILayout.Button(new GUIContent("x", "Dismiss"), GUILayout.Width(20)))
+                    {
+                        status = null;
+                    }
+                }
             }
         }
 
@@ -777,17 +798,7 @@ namespace AreezKhan79.PackageHub.Editor
 
             // Rendered outside the foldout body so it's still visible even after
             // a successful creation collapses the section.
-            if (_createRegistryStatus != null)
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.HelpBox(_createRegistryStatus, _createRegistryIsError ? MessageType.Error : MessageType.Info);
-                    if (GUILayout.Button("x", GUILayout.Width(20), GUILayout.Height(20)))
-                    {
-                        _createRegistryStatus = null;
-                    }
-                }
-            }
+            DrawStatusMessage(ref _createRegistryStatus, _createRegistryIsError);
 
             EditorGUILayout.Space();
         }
@@ -976,17 +987,7 @@ namespace AreezKhan79.PackageHub.Editor
                 }
             }
 
-            if (_createPackageStatus != null)
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.HelpBox(_createPackageStatus, _createPackageIsError ? MessageType.Error : MessageType.Info);
-                    if (GUILayout.Button("x", GUILayout.Width(20), GUILayout.Height(20)))
-                    {
-                        _createPackageStatus = null;
-                    }
-                }
-            }
+            DrawStatusMessage(ref _createPackageStatus, _createPackageIsError);
 
             EditorGUILayout.Space();
         }
