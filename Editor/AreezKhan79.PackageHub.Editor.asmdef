@@ -1,0 +1,16 @@
+{
+  "name": "AreezKhan79.PackageHub.Editor",
+  "rootNamespace": "AreezKhan79.PackageHub.Editor",
+  "references": [],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
